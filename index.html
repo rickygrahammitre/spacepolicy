@@ -1,0 +1,1793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESA Space Debris Visualization</title>
+    <style>
+        :root {
+            --primary-color: #ffffff;
+            --secondary-color: #00bfff;
+            --background-dark: #000814;
+            --text-light: #ffffff;
+            --border-radius: 4px;
+            --tooltip-bg: rgba(0,0,0,0.95);
+            --transition-smooth: all 0.3s ease;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--background-dark);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: auto;
+            color: var(--text-light);
+        }
+        
+        .container {
+            position: relative;
+            width: min(1200px, 100vw - 40px);
+            height: 700px;
+            margin: 0 auto;
+            background: var(--background-dark);
+            border-radius: 10px;
+            overflow: visible;
+            transition: var(--transition-smooth);
+        }
+        
+        /* Remove the complex gradient background - SVG will handle it */
+        .container::before {
+            display: none;
+        }
+        
+        /* Enable background for night sky mode */
+        .container.scheme-nightsky::before {
+            display: block !important;
+        }
+
+        .svg-arc-layer, .svg-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1200px;
+            height: 600px;
+            pointer-events: none; /* Ensure SVG doesn't block hover events */
+            z-index: 1;
+        }
+
+        .svg-layer {
+            z-index: 2; /* Altitude lines above arcs but below content */
+        }
+
+        .content-layer {
+            position: relative;
+            z-index: 10;
+            height: 100%;
+        }
+
+        /* Heat map color scheme matching the reference visual */
+        .container, .container.scheme-yellow {
+            --arc-color-1: rgba(76, 175, 80, 1.0);     /* Green (350-400km) */
+            --arc-color-1b: rgba(255, 165, 0, 1.0);    /* Orange (400-600km) */
+            --arc-color-1c: rgba(255, 230, 0, 1.0);    /* Yellow (600-800km) */
+            --arc-color-2: rgba(255, 200, 0, 1.0);     /* Red (800-1100km) */
+            --arc-color-3: rgba(156, 39, 176, 1.0);    /* Purple (1100-2000km) */
+        }
+
+        /* Color scheme variations - heat map style */
+        .container.scheme-blue {
+            --arc-color-1: rgba(0, 150, 200, 1.0);     /* Blue-green (350-400km) */
+            --arc-color-1b: rgba(255, 165, 0, 1.0);    /* Orange (400-600km) */
+            --arc-color-1c: rgba(255, 255, 100, 1.0);  /* Light yellow (600-800km) */
+            --arc-color-2: rgba(50, 150, 255, 1.0);    /* Bright blue (800-1100km) */
+            --arc-color-3: rgba(100, 200, 255, 1.0);   /* Light blue (1100-2000km) */
+        }
+
+        .container.scheme-red {
+            --arc-color-1: rgba(100, 50, 0, 1.0);      /* Dark red-brown (350-400km) */
+            --arc-color-1b: rgba(255, 165, 0, 1.0);    /* Orange (400-600km) */
+            --arc-color-1c: rgba(255, 200, 100, 1.0);  /* Light orange (600-800km) */
+            --arc-color-2: rgba(255, 50, 100, 1.0);    /* Bright red (800-1100km) */
+            --arc-color-3: rgba(255, 100, 150, 1.0);   /* Pink (1100-2000km) */
+        }
+
+        .container.scheme-green {
+            --arc-color-1: rgba(0, 100, 80, 1.0);      /* Dark green (350-400km) */
+            --arc-color-1b: rgba(255, 165, 0, 1.0);    /* Orange (400-600km) */
+            --arc-color-1c: rgba(200, 255, 100, 1.0);  /* Light green (600-800km) */
+            --arc-color-2: rgba(50, 255, 120, 1.0);    /* Bright green (800-1100km) */
+            --arc-color-3: rgba(100, 200, 150, 1.0);   /* Soft green (1100-2000km) */
+        }
+
+        .container.scheme-purple {
+            --arc-color-1: rgba(80, 0, 120, 1.0);      /* Dark purple (350-400km) */
+            --arc-color-1b: rgba(255, 165, 0, 1.0);    /* Orange (400-600km) */
+            --arc-color-1c: rgba(255, 180, 100, 1.0);  /* Light orange (600-800km) */
+            --arc-color-2: rgba(200, 50, 255, 1.0);    /* Bright purple (800-1100km) */
+            --arc-color-3: rgba(200, 100, 255, 1.0);   /* Light purple (1100-2000km) */
+        }
+
+        .container.scheme-orange {
+            --arc-color-1: rgba(100, 50, 0, 1.0);      /* Dark brown (350-400km) */
+            --arc-color-1b: rgba(255, 165, 0, 1.0);    /* Orange (400-600km) */
+            --arc-color-1c: rgba(255, 220, 100, 1.0);  /* Light orange (600-800km) */
+            --arc-color-2: rgba(255, 150, 50, 1.0);    /* Bright orange (800-1100km) */
+            --arc-color-3: rgba(255, 150, 80, 1.0);    /* Soft orange (1100-2000km) */
+        }
+
+        .container.scheme-orbital {
+            --arc-color-1: rgba(76, 175, 80, 1.0);   /* Green - Class E (350-400km) */
+            --arc-color-1b: rgba(255, 140, 0, 1.0);  /* Orange - Class A (400-600km) */
+            --arc-color-1c: rgba(156, 39, 176, 1.0); /* Purple - Class C (600-800km) */
+            --arc-color-2: rgba(255, 0, 0, 1.0);     /* Red - Class B (800-1100km) */
+            --arc-color-3: rgba(156, 39, 176, 1.0);  /* Purple - Class D (1100-2000km) */
+        }
+
+        .container.scheme-nightsky {
+            --arc-color-1: rgba(0, 0, 0, 0);         /* Transparent - no arcs */
+            --arc-color-1b: rgba(0, 0, 0, 0);        /* Transparent - no arcs */
+            --arc-color-1c: rgba(0, 0, 0, 0);        /* Transparent - no arcs */
+            --arc-color-2: rgba(0, 0, 0, 0);         /* Transparent - no arcs */
+            --arc-color-3: rgba(0, 0, 0, 0);         /* Transparent - no arcs */
+        }
+
+        /* Night Sky background with CSS-generated starfield - cropped to arc area */
+        .container.scheme-nightsky::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 600px; /* Match the arc height */
+            background: 
+                /* Bright prominent stars */
+                radial-gradient(2px 2px at 80px 45px, #fff, transparent),
+                radial-gradient(1.5px 1.5px at 280px 80px, rgba(255,255,255,0.95), transparent),
+                radial-gradient(2.5px 2.5px at 450px 25px, #fff, transparent),
+                radial-gradient(1.8px 1.8px at 620px 70px, rgba(255,255,255,0.9), transparent),
+                radial-gradient(2px 2px at 750px 35px, #fff, transparent),
+                radial-gradient(1.5px 1.5px at 920px 90px, rgba(255,255,255,0.8), transparent),
+                /* Medium scattered stars */
+                radial-gradient(1px 1px at 35px 15px, rgba(255,255,255,0.7), transparent),
+                radial-gradient(1px 1px at 150px 55px, rgba(255,255,255,0.6), transparent),
+                radial-gradient(1px 1px at 220px 25px, rgba(255,255,255,0.8), transparent),
+                radial-gradient(1px 1px at 340px 95px, rgba(255,255,255,0.5), transparent),
+                radial-gradient(1px 1px at 380px 40px, rgba(255,255,255,0.7), transparent),
+                radial-gradient(1px 1px at 520px 85px, rgba(255,255,255,0.6), transparent),
+                radial-gradient(1px 1px at 580px 15px, rgba(255,255,255,0.8), transparent),
+                radial-gradient(1px 1px at 680px 65px, rgba(255,255,255,0.5), transparent),
+                radial-gradient(1px 1px at 780px 10px, rgba(255,255,255,0.7), transparent),
+                radial-gradient(1px 1px at 850px 50px, rgba(255,255,255,0.6), transparent),
+                /* Dense field of tiny dim stars */
+                radial-gradient(0.5px 0.5px at 20px 30px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 60px 75px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 110px 20px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 170px 85px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(0.5px 0.5px at 200px 50px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 260px 10px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 310px 70px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 360px 15px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(0.5px 0.5px at 420px 60px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 480px 30px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 540px 95px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 600px 45px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(0.5px 0.5px at 660px 20px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 720px 80px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 800px 25px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 880px 75px, rgba(255,255,255,0.35), transparent),
+                /* Pure deep space black background */
+                #000000;
+            background-size: 
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                100% 100%;
+            border-radius: 10px 10px 0 0; /* Only round top corners */
+            z-index: 0;
+            opacity: 0.85;
+        }
+
+        /* Hide arcs in night sky mode */
+        .container.scheme-nightsky .svg-arc-layer {
+            display: none;
+        }
+
+        .svg-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .content-layer {
+            position: relative;
+            z-index: 3;
+            height: 100%;
+        }
+        
+        .altitude-curve {
+            fill: none;
+            stroke: var(--primary-color);
+            stroke-width: 10;
+            opacity: 1.0;
+        }
+        
+        .altitude-label {
+            fill: var(--primary-color);
+            font-size: 12px;
+            font-weight: bold;
+            text-anchor: middle;
+        }
+        
+        .spacecraft {
+            position: absolute;
+            background: var(--secondary-color);
+            color: var(--text-light);
+            padding: 4px 8px;
+            border-radius: var(--border-radius);
+            font-size: 12px;
+            font-weight: bold;
+            transform: translateY(-50%);
+            white-space: nowrap;
+            z-index: 10;
+        }
+        
+        .spacecraft-dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: var(--secondary-color);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 9;
+        }
+        
+        .density-curve {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            pointer-events: none;
+            z-index: 4;
+        }
+        
+        .density-path {
+            fill: none;
+            stroke: var(--text-light);
+            stroke-width: 3;
+        }
+        
+        .density-path-outline {
+            fill: none;
+            stroke: #000000;
+            stroke-width: 5;
+        }
+        
+        .esa-logo {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: var(--text-light);
+            font-size: 24px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            z-index: 10;
+        }
+        
+        .esa-spiral {
+            display: inline-block;
+            margin-right: 10px;
+            width: 30px;
+            height: 30px;
+            border: 3px solid var(--text-light);
+            border-radius: 50%;
+            position: relative;
+        }
+        
+        .esa-spiral::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            right: 2px;
+            bottom: 2px;
+            border: 2px solid var(--text-light);
+            border-radius: 50%;
+        }
+        
+        .labels {
+            position: absolute;
+            bottom: 10%;
+            left: 30%;
+            transform: translateX(-50%);
+            color: var(--secondary-color);
+            text-align: center;
+            z-index: 10;
+        }
+        
+        .label-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .label-subtitle {
+            font-size: 14px;
+            font-style: italic;
+        }
+        
+        .neighborhood-label {
+            position: absolute;
+            color: var(--text-light);
+            font-size: 11px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.95);
+            padding: 8px 12px;
+            border-radius: 6px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+            cursor: ns-resize; /* Show vertical resize cursor */
+            transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+            border: 2px solid transparent;
+            max-width: 160px;
+            line-height: 1.3;
+            z-index: 1000; /* Much higher z-index to ensure above arcs and blur effects */
+            backdrop-filter: blur(8px);
+            user-select: none; /* Prevent text selection during drag */
+            box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+        }
+        
+        .neighborhood-label.dragging {
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
+            transition: none; /* Disable transitions during drag */
+            z-index: 10001; /* Bring to front during drag, above all other labels */
+        }
+        
+        .neighborhood-label:hover {
+            background: rgba(0,0,0,0.98);
+            border-color: var(--primary-color);
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        
+        /* CSS-only tooltip */
+        .neighborhood-label::after {
+            content: attr(data-title) "\A\A" attr(data-altitude) "\A\A" attr(data-occupancy) "\A\A" attr(data-persistence);
+            white-space: pre-line;
+            position: absolute;
+            background: rgba(0,0,0,0.98);
+            color: var(--text-light);
+            padding: 16px;
+            border-radius: 8px;
+            font-size: 12px;
+            width: 350px;
+            z-index: 10000; /* Extremely high z-index to always be on top */
+            border: 2px solid var(--primary-color);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            pointer-events: none;
+            line-height: 1.5;
+            left: 100%;
+            top: 0;
+            margin-left: 10px;
+            backdrop-filter: blur(12px);
+        }
+        
+        .neighborhood-label:hover::after {
+            opacity: 1;
+            visibility: visible;
+            z-index: 99999; /* Ensure hover state is also on top */
+        }
+        
+        .good-neighborhood {
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .bad-neighborhood {
+            border-left: 4px solid #0D47A1;
+        }
+        
+        .neutral-neighborhood {
+            border-left: 4px solid #9C27B0;
+        }
+        
+        /* Class-specific border colors accounting for blur effects */
+        .class-e {
+            border-left: 4px solid #4CAF50; /* Green - matches arc-color-1 */
+        }
+        
+        .class-a {
+            border-left: 4px solid #FF8F00; /* Green-red (orange) - accounting for blur mixing */
+        }
+        
+        .class-c {
+            border-left: 4px solid #ffd700; /* Yellow */
+        }
+        
+        .class-b {
+            border-left: 4px solid #FF1744; /* Bright alarm red - accounting for blur mixing */
+        }
+        
+        .class-d {
+            border-left: 4px solid #9C27B0; /* Purple - accounting for blur mixing */
+        }
+        
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.98);
+            color: var(--text-light);
+            padding: 16px;
+            border-radius: 8px;
+            font-size: 12px;
+            max-width: 320px;
+            z-index: 10000; /* Extremely high z-index to always be on top */
+            border: 2px solid var(--primary-color);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+            pointer-events: none;
+            line-height: 1.5;
+            visibility: hidden; /* Start hidden */
+            min-height: 120px; /* Minimum height for positioning calculations */
+            backdrop-filter: blur(12px);
+        }
+        
+        .tooltip.visible {
+            opacity: 1;
+            transform: translateY(0);
+            visibility: visible; /* Show when visible */
+            z-index: 99999; /* Ensure visible state is also on top */
+        }
+        
+        .tooltip-title {
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-bottom: 12px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255, 215, 0, 0.3);
+            padding-bottom: 8px;
+        }
+        
+        .tooltip-section {
+            margin-bottom: 10px;
+        }
+        
+        .tooltip-label {
+            font-weight: bold;
+            color: #cccccc;
+            display: inline-block;
+            min-width: 80px;
+        }
+
+        .controls {
+            width: min(1200px, 100vw - 40px);
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        .color-selector {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 16px 24px;
+            border-radius: 16px;
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        .color-selector label {
+            color: var(--text-light);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .color-selector select {
+            padding: 8px 16px;
+            font-size: 14px;
+            border: 2px solid var(--primary-color);
+            background: rgba(0, 0, 0, 0.8);
+            color: var(--text-light);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            min-width: 180px;
+        }
+
+        .color-selector select:focus {
+            outline: none;
+            border-color: #ffed4e;
+            box-shadow: 0 0 0 3px rgba(255, 237, 78, 0.2);
+        }
+
+        .color-selector select:hover {
+            background: rgba(0, 0, 0, 0.9);
+        }
+        
+        /* Modern CSS-only color scheme buttons */
+        .scheme-button {
+            padding: 12px 20px;
+            font-size: 13px;
+            font-weight: 500;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.85);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            margin: 0 6px;
+            display: inline-block;
+            position: relative;
+            backdrop-filter: blur(8px);
+            letter-spacing: 0.5px;
+            user-select: none;
+        }
+        
+        .scheme-button:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 215, 0, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        /* CSS-only color scheme changes */
+        #scheme-yellow:checked ~ #visualization {
+            --arc-color-1: rgba(76, 175, 80, 1.0);
+            --arc-color-1b: rgba(255, 165, 0, 1.0);
+            --arc-color-1c: rgba(255, 230, 0, 1.0);
+            --arc-color-2: rgba(255, 200, 0, 1.0);
+            --arc-color-3: rgba(156, 39, 176, 1.0);
+        }
+        
+        #scheme-blue:checked ~ #visualization {
+            --arc-color-1: rgba(0, 150, 200, 1.0);
+            --arc-color-1b: rgba(255, 165, 0, 1.0);
+            --arc-color-1c: rgba(255, 255, 100, 1.0);
+            --arc-color-2: rgba(50, 150, 255, 1.0);
+            --arc-color-3: rgba(100, 200, 255, 1.0);
+        }
+        
+        #scheme-red:checked ~ #visualization {
+            --arc-color-1: rgba(100, 50, 0, 1.0);
+            --arc-color-1b: rgba(255, 165, 0, 1.0);
+            --arc-color-1c: rgba(255, 200, 100, 1.0);
+            --arc-color-2: rgba(255, 50, 100, 1.0);
+            --arc-color-3: rgba(255, 100, 150, 1.0);
+        }
+        
+        #scheme-green:checked ~ #visualization {
+            --arc-color-1: rgba(0, 100, 80, 1.0);
+            --arc-color-1b: rgba(255, 165, 0, 1.0);
+            --arc-color-1c: rgba(200, 255, 100, 1.0);
+            --arc-color-2: rgba(50, 255, 120, 1.0);
+            --arc-color-3: rgba(100, 200, 150, 1.0);
+        }
+        
+        #scheme-purple:checked ~ #visualization {
+            --arc-color-1: rgba(80, 0, 120, 1.0);
+            --arc-color-1b: rgba(255, 165, 0, 1.0);
+            --arc-color-1c: rgba(255, 180, 100, 1.0);
+            --arc-color-2: rgba(200, 50, 255, 1.0);
+            --arc-color-3: rgba(200, 100, 255, 1.0);
+        }
+        
+        #scheme-orange:checked ~ #visualization {
+            --arc-color-1: rgba(100, 50, 0, 1.0);
+            --arc-color-1b: rgba(255, 165, 0, 1.0);
+            --arc-color-1c: rgba(255, 220, 100, 1.0);
+            --arc-color-2: rgba(255, 150, 50, 1.0);
+            --arc-color-3: rgba(255, 150, 80, 1.0);
+        }
+        
+        #scheme-orbital:checked ~ #visualization {
+            --arc-color-1: rgba(76, 175, 80, 1.0);
+            --arc-color-1b: rgba(255, 140, 0, 1.0);
+            --arc-color-1c: rgba(156, 39, 176, 1.0);
+            --arc-color-2: rgba(255, 0, 0, 1.0);
+            --arc-color-3: rgba(156, 39, 176, 1.0);
+        }
+        
+        #scheme-nightsky:checked ~ #visualization {
+            --arc-color-1: rgba(0, 0, 0, 0);
+            --arc-color-1b: rgba(0, 0, 0, 0);
+            --arc-color-1c: rgba(0, 0, 0, 0);
+            --arc-color-2: rgba(0, 0, 0, 0);
+            --arc-color-3: rgba(0, 0, 0, 0);
+        }
+
+        #scheme-nightsky:checked ~ #visualization::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 600px; /* Match the arc height */
+            background: 
+                /* Bright prominent stars */
+                radial-gradient(2px 2px at 80px 45px, #fff, transparent),
+                radial-gradient(1.5px 1.5px at 280px 80px, rgba(255,255,255,0.95), transparent),
+                radial-gradient(2.5px 2.5px at 450px 25px, #fff, transparent),
+                radial-gradient(1.8px 1.8px at 620px 70px, rgba(255,255,255,0.9), transparent),
+                radial-gradient(2px 2px at 750px 35px, #fff, transparent),
+                radial-gradient(1.5px 1.5px at 920px 90px, rgba(255,255,255,0.8), transparent),
+                /* Medium scattered stars */
+                radial-gradient(1px 1px at 35px 15px, rgba(255,255,255,0.7), transparent),
+                radial-gradient(1px 1px at 150px 55px, rgba(255,255,255,0.6), transparent),
+                radial-gradient(1px 1px at 220px 25px, rgba(255,255,255,0.8), transparent),
+                radial-gradient(1px 1px at 340px 95px, rgba(255,255,255,0.5), transparent),
+                radial-gradient(1px 1px at 380px 40px, rgba(255,255,255,0.7), transparent),
+                radial-gradient(1px 1px at 520px 85px, rgba(255,255,255,0.6), transparent),
+                radial-gradient(1px 1px at 580px 15px, rgba(255,255,255,0.8), transparent),
+                radial-gradient(1px 1px at 680px 65px, rgba(255,255,255,0.5), transparent),
+                radial-gradient(1px 1px at 780px 10px, rgba(255,255,255,0.7), transparent),
+                radial-gradient(1px 1px at 850px 50px, rgba(255,255,255,0.6), transparent),
+                /* Dense field of tiny dim stars */
+                radial-gradient(0.5px 0.5px at 20px 30px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 60px 75px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 110px 20px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 170px 85px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(0.5px 0.5px at 200px 50px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 260px 10px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 310px 70px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 360px 15px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(0.5px 0.5px at 420px 60px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 480px 30px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 540px 95px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 600px 45px, rgba(255,255,255,0.35), transparent),
+                radial-gradient(0.5px 0.5px at 660px 20px, rgba(255,255,255,0.3), transparent),
+                radial-gradient(0.5px 0.5px at 720px 80px, rgba(255,255,255,0.4), transparent),
+                radial-gradient(0.5px 0.5px at 800px 25px, rgba(255,255,255,0.25), transparent),
+                radial-gradient(0.5px 0.5px at 880px 75px, rgba(255,255,255,0.35), transparent),
+                /* Pure deep space black background */
+                #000000;
+            background-size: 
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                300px 100px, 300px 100px, 300px 100px, 300px 100px,
+                100% 100%;
+            border-radius: 10px 10px 0 0; /* Only round top corners */
+            z-index: 0;
+            opacity: 0.85;
+            display: block !important;
+        }
+
+        #scheme-nightsky:checked ~ #visualization .svg-arc-layer {
+            display: none;
+        }
+        
+        /* Modern active button styling */
+        #scheme-yellow:checked ~ .controls .scheme-button[for="scheme-yellow"],
+        #scheme-blue:checked ~ .controls .scheme-button[for="scheme-blue"],
+        #scheme-red:checked ~ .controls .scheme-button[for="scheme-red"],
+        #scheme-green:checked ~ .controls .scheme-button[for="scheme-green"],
+        #scheme-purple:checked ~ .controls .scheme-button[for="scheme-purple"],
+        #scheme-orange:checked ~ .controls .scheme-button[for="scheme-orange"],
+        #scheme-orbital:checked ~ .controls .scheme-button[for="scheme-orbital"],
+        #scheme-nightsky:checked ~ .controls .scheme-button[for="scheme-nightsky"] {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%) !important;
+            color: #1a1a1a !important;
+            border: 1px solid rgba(255, 215, 0, 0.8) !important;
+            box-shadow: 
+                0 4px 15px rgba(255, 215, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+            transform: translateY(0) scale(1.02) !important;
+            font-weight: 600 !important;
+        }
+        
+        /* Prevent hover effects on active buttons */
+        #scheme-yellow:checked ~ .controls .scheme-button[for="scheme-yellow"]:hover,
+        #scheme-blue:checked ~ .controls .scheme-button[for="scheme-blue"]:hover,
+        #scheme-red:checked ~ .controls .scheme-button[for="scheme-red"]:hover,
+        #scheme-green:checked ~ .controls .scheme-button[for="scheme-green"]:hover,
+        #scheme-purple:checked ~ .controls .scheme-button[for="scheme-purple"]:hover,
+        #scheme-orange:checked ~ .controls .scheme-button[for="scheme-orange"]:hover,
+        #scheme-orbital:checked ~ .controls .scheme-button[for="scheme-orbital"]:hover,
+        #scheme-nightsky:checked ~ .controls .scheme-button[for="scheme-nightsky"]:hover {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%) !important;
+            transform: translateY(0) scale(1.02) !important;
+            box-shadow: 
+                0 4px 15px rgba(255, 215, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        }
+
+        /* JavaScript-managed active button class */
+        .scheme-button.active-scheme {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%) !important;
+            color: #1a1a1a !important;
+            border: 1px solid rgba(255, 215, 0, 0.8) !important;
+            box-shadow: 
+                0 4px 15px rgba(255, 215, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+            transform: translateY(0) scale(1.02) !important;
+            font-weight: 600 !important;
+        }
+
+        .scheme-button.active-scheme:hover {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%) !important;
+            transform: translateY(0) scale(1.02) !important;
+            box-shadow: 
+                0 4px 15px rgba(255, 215, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .container {
+                height: 400px;
+            }
+            
+            .esa-logo {
+                font-size: 18px;
+                top: 10px;
+                right: 10px;
+            }
+            
+            .esa-spiral {
+                width: 20px;
+                height: 20px;
+                margin-right: 5px;
+            }
+            
+            .neighborhood-label {
+                font-size: 9px;
+                padding: 6px 8px;
+                max-width: 120px;
+            }
+            
+            .spacecraft {
+                font-size: 10px;
+                padding: 2px 6px;
+            }
+            
+            .tooltip {
+                max-width: 250px;
+                font-size: 11px;
+                padding: 12px;
+            }
+        }
+
+        /* Performance optimizations */
+        .container * {
+            will-change: auto;
+        }
+
+        .neighborhood-label:hover,
+        .tooltip.visible {
+            will-change: transform, opacity;
+        }
+
+        /* Accessibility improvements */
+        .neighborhood-label:focus {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                transition: none !important;
+                animation: none !important;
+            }
+        }
+
+        /* Info section styling */
+        .info-section {
+            position: absolute;
+            top: 20px;
+            right: 70px;
+            z-index: 1000;
+        }
+
+        .info-button {
+            background: #ffd700 !important;
+            color: #000814 !important;
+            border: 2px solid #ffffff !important;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 1001;
+            display: none !important;
+            margin: 0;
+            font-weight: bold;
+        }
+
+        /* Pulse animation for question mark on startup */
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 0 0 0 rgba(255, 215, 0, 0.7);
+            }
+            50% {
+                transform: scale(1.1);
+                box-shadow: 0 6px 20px rgba(0,0,0,0.4), 0 0 0 10px rgba(255, 215, 0, 0.3);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 0 0 0 rgba(255, 215, 0, 0);
+            }
+        }
+
+        .info-button.pulse {
+            animation: pulse 2s ease-in-out 3;
+        }
+
+        .info-button:hover {
+            background: #ffed4e;
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+        }
+
+        .info-box {
+            position: absolute;
+            top: 60px;
+            right: -250px;
+            background: rgba(0,0,0,0.98);
+            border: 2px solid var(--primary-color);
+            border-radius: 12px;
+            padding: 0;
+            width: 500px;
+            max-width: 90vw;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.3s ease;
+            z-index: 100;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        .info-box.visible {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .info-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 215, 0, 0.3);
+            background: rgba(255, 215, 0, 0.1);
+            border-radius: 10px 10px 0 0;
+        }
+
+        .info-header h3 {
+            margin: 0;
+            color: var(--primary-color);
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .close-button {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition-smooth);
+        }
+
+        .close-button:hover {
+            background: rgba(255, 215, 0, 0.2);
+        }
+
+        .info-content {
+            padding: 20px;
+            color: var(--text-light);
+        }
+
+        .info-content p {
+            margin: 0 0 16px 0;
+            text-align: center;
+            font-size: 16px;
+        }
+
+        .legend-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 16px 0;
+        }
+
+        .legend-list li {
+            padding: 8px 0;
+            font-size: 14px;
+            line-height: 1.4;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .legend-list li:last-child {
+            border-bottom: none;
+        }
+
+        .info-note {
+            font-style: italic;
+            color: #cccccc;
+            font-size: 12px;
+            text-align: center;
+            margin: 16px 0 0 0;
+        }
+
+        /* Context menu styling */
+        .context-menu {
+            position: fixed;
+            background: rgba(0,0,0,0.98);
+            border: 2px solid var(--primary-color);
+            border-radius: 8px;
+            padding: 8px 0;
+            z-index: 100000;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            min-width: 180px;
+            display: none;
+        }
+
+        .context-menu-item {
+            padding: 12px 16px;
+            color: var(--text-light);
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .context-menu-item:hover {
+            background: rgba(255, 215, 0, 0.2);
+        }
+
+        .context-menu-item:active {
+            background: rgba(255, 215, 0, 0.3);
+        }
+
+        /* arrow */
+        .fixed-arrow-label-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 1200px;
+            height: 48px;
+            z-index: 20;
+            pointer-events: none;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+
+        @media (max-width: 1220px) {
+            .fixed-arrow-label-bar {
+                width: 100vw;
+                min-width: 100vw;
+                left: 0;
+            }
+        }
+
+        .fixed-arrow-label-bar .arrow-svg {
+            width: 90%;
+            height: 32px;
+            display: block;
+            position: absolute;
+            left: 0;
+            top: 16px;
+            pointer-events: none;
+        }
+
+        .fixed-arrow-label-bar .arrow-label {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            transform: translateX(-50%);
+            color: #ffffff;
+            font-size: 18px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 18px;
+            border-radius: 8px;
+            z-index: 21;
+            pointer-events: none;
+            text-shadow: 0 2px 8px #000;
+            white-space: nowrap;
+        }
+
+    </style>
+</head>
+<body>
+    <!-- Color scheme controls need to be at body level for CSS selectors -->
+    <input type="radio" id="scheme-yellow" name="colorScheme" value="yellow" style="display: none;">
+    <input type="radio" id="scheme-blue" name="colorScheme" value="blue" style="display: none;">
+    <input type="radio" id="scheme-red" name="colorScheme" value="red" style="display: none;">
+    <input type="radio" id="scheme-green" name="colorScheme" value="green" style="display: none;">
+    <input type="radio" id="scheme-purple" name="colorScheme" value="purple" style="display: none;">
+    <input type="radio" id="scheme-orange" name="colorScheme" value="orange" style="display: none;">
+    <input type="radio" id="scheme-orbital" name="colorScheme" value="orbital" checked style="display: none;">
+    <input type="radio" id="scheme-nightsky" name="colorScheme" value="nightsky" style="display: none;">
+    
+    
+    <div class="container scheme-orbital" id="visualization">
+     <!-- Move arrow and label below the density curve -->
+        <div class="fixed-arrow-label-bar" style="top: auto; bottom: 10px;">
+            <svg class="arrow-svg" viewBox="0 0 1200 32" preserveAspectRatio="none">
+                <defs>
+                    <marker id="arrowhead-fixed" markerWidth="20" markerHeight="16" refX="14" refY="8" orient="auto" markerUnits="strokeWidth">
+                        <polygon points="0,0 16,8 0,16" fill="#FFFFFF"/>
+                    </marker>
+                </defs>
+                <!-- Long white arrow
+                <line x1="24" y1="16" x2="1176" y2="16" stroke="#FFFFFF" stroke-width="2" marker-end="url(#arrowhead-fixed)" /> -->
+            </svg>
+        </div>
+         <svg class="svg-arc-layer" viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid meet">
+            <!-- Enhanced gradients with more stops for ultra-smooth transitions -->
+            <defs>
+            </defs>
+            
+            <!-- Green Arc: 350–400 km -->
+            <path d="M 80,0 Q 170,300 80,600 
+                    L 0,600 Q 90,300 0,0 Z" 
+                fill="var(--arc-color-1)" 
+                style="mix-blend-mode: normal; filter: none; opacity: 0.8;"/>
+            <!-- Orange Arc: 400–600 km -->
+            <path d="M 250,0 Q 340,300 250,600 
+                    L 80,600 Q 170,300 80,0 Z" 
+                fill="rgba(255, 165, 0, 1.0)"
+                style="mix-blend-mode: normal; filter: none; opacity: 0.9;"/>
+            <!-- Yellow Arc: 600–800 km -->
+            <path d="M 420,0 Q 510,300 420,600 
+                    L 250,600 Q 340,300 250,0 Z" 
+                fill="rgba(255, 230, 0, 1.0)"
+                style="mix-blend-mode: normal; filter: none; opacity: 0.9;"/>
+            <!-- Red Arc: 800–1100 km -->
+            <path d="M 560,0 Q 650,300 560,600 
+                    L 420,600 Q 510,300 420,0 Z" 
+                fill="var(--arc-color-2)"
+                style="mix-blend-mode: normal; filter: none; opacity: 1.0;"/>
+            <!-- Purple Arc: 1100–2000 km -->
+            <path d="M 1150,0 Q 1240,300 1150,600 
+                    L 560,600 Q 650,300 560,0 Z" 
+                fill="var(--arc-color-3)"
+                style="mix-blend-mode: normal; filter: none; opacity: 0.9;"/>
+
+
+            <!-- Enhanced burn luminosity @ 800km - extended into red arc -->
+            <path d="M 480,0 Q 570,300 480,600
+                    L 380,600 Q 470,300 380,0 Z"
+                fill="rgba(255,255,255, 1.0)"
+                style="mix-blend-mode: luminosity; filter: blur(60px);"/>
+            
+            <!-- Intense core burn @ 800km - extended into red arc -->
+            <path d="M 470,0 Q 560,300 470,600
+                    L 390,600 Q 480,300 390,0 Z"
+                fill="rgba(255,255,255, 1.0)"
+                style="mix-blend-mode: luminosity; filter: blur(40px);"/>
+            
+            <!-- Super intense core @ 800km - extended into red arc -->
+            <path d="M 460,0 Q 550,300 460,600
+                    L 400,600 Q 490,300 400,0 Z"
+                fill="rgba(255,255,255, 1.0)"
+                style="mix-blend-mode: screen; filter: blur(15px);"/>
+            
+            <!-- Additional burn bleeding into red arc -->
+            <path d="M 500,0 Q 590,300 500,600
+                    L 420,600 Q 510,300 420,0 Z"
+                fill="rgba(255,255,255, 0.7)"
+                style="mix-blend-mode: luminosity; filter: blur(80px);"/>
+
+
+
+
+
+
+
+
+
+
+            <!-- 1100km luminous blur -->
+            <!-- <path d="M 535,0 Q 585,300 535,600
+                    L 525,600 Q 575,300 525,0 Z"
+                fill="rgba(0,255,255, 1.0)"
+                style="mix-blend-mode: luminosity; filter: blur(1px);"/> -->
+                                
+          </svg>
+            <svg class="svg-layer" style="z-index: 3; pointer-events: none;">
+            <!-- 400 km (green/orange transition, left edge of orange/red arc) -->
+            <path class="neighborhood-boundary" d="M 80,0 Q 170,300 80,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+
+            <!-- 600 km boundary -->
+            <path class="neighborhood-boundary" d="M 250,0 Q 340,300 250,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+
+            <!----800km peak line boundary -->
+            <path class="neighborhood-boundary" d="M 420,0 Q 510,300 420,600"
+                style="stroke: #ffd700; mix-blend-mode: lighten; stroke-width: 4; fill: none; opacity: 1.0;"/>
+
+            <!-- 900 km boundary -->
+            <path class="neighborhood-boundary" d="M 465,0 Q 555,300 465,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+
+            <!-- 1100 km (red/purple transition, left edge of purple arc) -->
+            <path class="neighborhood-boundary" d="M 560,0 Q 650,300 560,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+
+            <!-- 1200 km (purple/blue transition, left edge of blue arc) -->
+            <path class="neighborhood-boundary" d="M 680,0 Q 770,300 680,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+
+            <!-- 1400 km (blue/light blue transition, left edge of light blue arc) -->
+            <path class="neighborhood-boundary" d="M 850,0 Q 940,300 850,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+           
+                <!-- 2000 km boundary (final boundary) -->
+            <path class="neighborhood-boundary" d="M 1150,0 Q 1240,300 1150,600"
+                style="stroke: #ffd700; stroke-width: 1; fill: none; opacity: 1.0;"/>
+     
+            <!-- Straight black outline across the top of the plot -->
+            <line x1="0" y1="0" x2="1200" y2="0" stroke="#000000" stroke-width="2" opacity="1.0"/>
+            
+                
+            <!-- Altitude reference labels in white - positioned right next to yellow lines -->
+            <text style="fill: #ffffff; font-size: 22px; font-weight: normal; text-anchor: start; stroke: #000000; stroke-width: 1.5; paint-order: stroke fill;" 
+                  x="95" y="40" transform="rotate(-70 95,40)">400 km</text>
+            <text style="fill: #ffffff; font-size: 22px; font-weight: normal; text-anchor: start; stroke: #000000; stroke-width: 1.5; paint-order: stroke fill;" 
+                  x="265" y="80" transform="rotate(-70 265,80)">600 km</text>
+            <text style="fill: #ff0000; font-size: 24px; font-weight: bold; text-anchor: start; text-shadow: 0 0 3px #ffffff, 0 0 6px #ffffff;" 
+                  x="435" y="360" transform="rotate(-70 435,360)">800 km</text>
+            <text style="fill: #ff0000; font-size: 22px; font-weight: bold; text-anchor: start; text-shadow: 0 0 3px #ffffff, 0 0 6px #ffffff;" 
+                  x="480" y="100" transform="rotate(-70 480,100)">900 km</text>
+            <text style="fill: #ffffff; font-size: 22px; font-weight: normal; text-anchor: start; stroke: #000000; stroke-width: 1.5; paint-order: stroke fill;" 
+                  x="575" y="140" transform="rotate(-70 575,140)">1100 km</text>
+            <text style="fill: #ffffff; font-size: 22px; font-weight: normal; text-anchor: start; stroke: #000000; stroke-width: 1.5; paint-order: stroke fill;" 
+                  x="695" y="180" transform="rotate(-70 695,180)">1200 km</text>
+            <text style="fill: #ffffff; font-size: 22px; font-weight: normal; text-anchor: start; stroke: #000000; stroke-width: 1.5; paint-order: stroke fill;" 
+                  x="865" y="220" transform="rotate(-70 865,220)">1400 km</text>
+            <text style="fill: #ffffff; font-size: 22px; font-weight: normal; text-anchor: start; stroke: #000000; stroke-width: 1.5; paint-order: stroke fill;" 
+                  x="1165" y="260" transform="rotate(-70 1165,260)">2000 km</text>
+        </svg>
+
+        <div class="content-layer">
+            <!-- Neighborhood Labels -->
+            <div class="neighborhood-label class-e" style="left: 30px; top: 50px;" 
+                 tabindex="0"
+                 data-title="Class E: Human spaceflight and Cube Sats"
+                 data-altitude="350-450km"
+                 data-occupancy="Large space stations, operational non-maneuverable cubesats"
+                 data-persistence="Atmospheric drag removes fragments and intact hardware within weeks to months">
+                🚀 Class E: Human spaceflight<br>and Cube Sats<br>
+                <span style="font-size: 9px;">350-450km</span>
+            </div>
+            
+            <div class="neighborhood-label class-a" style="left: 120px; top: 350px;"
+                 tabindex="0"
+                 data-title="Class A: HIGHEST REQUIREMENTS - Low-LEO constellations"
+                 data-altitude="450-600km"
+                 data-occupancy="High density of operational spacecraft. Highest consequence of collision due to active operations and human spaceflight proximity."
+                 data-persistence="Operator requirements and information sharing CAN reduce risk. Atmospheric drag cleanses debris within years.">
+                ⚠️ Class A: HIGHEST REQUIREMENTS<br>Low-LEO constellations<br>
+                <span style="font-size: 9px;">400-600km</span>
+            </div>
+            
+            <div class="neighborhood-label class-c" style="left: 280px; top: 40px;"
+                 tabindex="0"
+                 data-title="Class C: Mid-LEO constellations"
+                 data-altitude="600-800km"
+                 data-occupancy="One major constellation, significant amount of fragmentation debris from previous breakup events"
+                 data-persistence="Drag does little to remove fragmentation debris from this region (i.e. will persist for decades)">
+                🛰️ Class C: Mid-LEO<br>constellations<br>
+                <span style="font-size: 9px;">600-800km</span>
+            </div>
+            
+            <div class="neighborhood-label class-b" style="left: 450px; top: 300px;"
+                 tabindex="0"
+                 data-title="Class B: Bad neighborhood - HIGH RISK but DERELICT"
+                 data-altitude="800-900km"
+                 data-occupancy="Large number of debris and high mass objects – 20% of LEO mass. Objects are DERELICT (uncontrolled)."
+                 data-persistence="Information sharing CANNOT reduce risk - objects cannot respond. Debris will persist for centuries.">
+                💥 Class B: Bad neighborhood<br><span style="font-size: 8px;">HIGH RISK but DERELICT</span><br>
+                <span style="font-size: 9px;">800-900km<br>20% of LEO mass</span>
+            </div>
+            
+            <div class="neighborhood-label class-b" style="left: 495px; top: 80px;"
+                 tabindex="0"
+                 data-title="Class B: High collision risk - DERELICT OBJECTS"
+                 data-altitude="900-1100km"
+                 data-occupancy="High spatial density of derelict objects including rocket bodies. Objects are UNCONTROLLED."
+                 data-persistence="Information sharing CANNOT reduce risk - objects cannot respond. Debris will persist for centuries.">
+                💥 Class B: High collision risk<br><span style="font-size: 8px;">DERELICT OBJECTS</span><br>
+                <span style="font-size: 9px;">900-1100km</span>
+            </div>
+            
+            <div class="neighborhood-label class-d" style="left: 750px; top: 350px;"
+                 tabindex="0"
+                 data-title="Class D: High-LEO constellations"
+                 data-altitude="1100-2000km"
+                 data-occupancy="Low risk unless a fragmentation event occurs"
+                 data-persistence="Debris will persist for centuries">
+                 🌌 Class D: High-LEO<br>constellations<br>
+                <span style="font-size: 9px;">1100-2000km</span>
+            </div>
+            
+            
+            <!-- Move density curve up (increase bottom spacing) -->
+        <div class="density-curve" style="bottom: 100px; transform: translateX(37px);">
+            <svg width="100%" height="100%">
+           <!-- Black outline for visibility against white burn effect -->
+           <path class="density-path-outline" d="
+            M 0,180
+            Q 100,175 180,165
+            Q 260,150 340,130
+            Q 380,110 410,80
+            Q 415,60 418,40     
+            Q 420,20 420,15     
+            Q 420,20 422,40     
+            Q 425,60 430,80    
+            Q 460,110 500,130
+            Q 540,150 580,165
+            Q 620,175 660,178
+            Q 700,180 740,180
+            Q 780,180 820,180
+            Q 860,180 900,180
+            Q 940,180 980,180
+            Q 1020,180 1060,180
+            Q 1100,180 1150,180
+        "/>
+           <!-- Top line to close the gap -->
+           <line x1="418" y1="17" x2="422" y2="17" stroke="#000000" stroke-width="5" opacity="1.0"/>
+           
+           <!-- White density path -->
+           <path class="density-path" d="
+            M 0,180
+            Q 100,175 180,165
+            Q 260,150 340,130
+            Q 380,110 410,80
+            Q 415,60 418,40     
+            Q 420,20 420,15     
+            Q 420,20 422,40     
+            Q 425,60 430,80    
+            Q 460,110 500,130
+            Q 540,150 580,165
+            Q 620,175 660,178
+            Q 700,180 740,180
+            Q 780,180 820,180
+            Q 860,180 900,180
+            Q 940,180 980,180
+            Q 1020,180 1060,180
+            Q 1100,180 1150,180
+        "/>
+           <!-- Top line to close the gap (white) -->
+           <line x1="418" y1="17" x2="422" y2="17" stroke="#ffffff" stroke-width="3" opacity="1.0"/>
+    </svg>
+        </div>
+            
+
+        <!-- Context menu -->
+        <div id="context-menu" class="context-menu">
+            <div class="context-menu-item" onclick="saveAsImage()">
+                📷 Save as Image
+            </div>
+        </div>
+        <!-- Fixed question mark info button inside visualization -->
+        <div class="info-section" id="info-section">
+            <button class="info-button" onclick="toggleInfo()" aria-label="Toggle color legend information">
+                ❓
+            </button>
+            <div class="info-box" id="info-box">
+                <div class="info-header">
+                    <h3>Orbital Classes</h3>
+                    <button class="close-button" onclick="toggleInfo()">×</button>
+                </div>
+                <div class="info-content">
+                    <p><strong>Spatial density of objects is represented by luminosity</strong></p>
+                    <div style="background: rgba(255, 215, 0, 0.1); padding: 12px; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid var(--primary-color);">
+                        <p style="margin: 0; font-size: 12px; line-height: 1.4;"><strong>Key Concept:</strong> Classes reflect operator requirements needed to mitigate risk and collision consequences. Class A is highest because information sharing CAN reduce risk and consequences are severe. Class B "bad neighborhood" has high risk but objects are DERELICT - information sharing cannot reduce risk.</p>
+                    </div>
+                    <ul class="legend-list">
+                        <li>🚀 <strong>Class E:</strong> Green (350-450km) - Human spaceflight and Cube Sats</li>
+                        <li>⚠️ <strong>Class A: HIGHEST REQUIREMENTS</strong> Red (450-600km) - Operational spacecraft, highest consequence</li>
+                        <li>🛰️ <strong>Class C:</strong> Purple (600-800km) - Mid-LEO constellations</li>
+                        <li>💥 <strong>Class B:</strong> Dark Blue (800-1100km) - High risk but DERELICT objects</li>
+                        <li>🌌 <strong>Class D:</strong> Light Blue (1100-2000km) - High-LEO constellations</li>
+                    </ul>
+                    <p class="info-note">Classes are relative to necessary operator requirements and collision consequences, not just risk level</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="color-selector">
+            <span style="color: var(--text-light); font-size: 14px; font-weight: 600; margin-right: 12px;">Color Scheme:</span>
+            
+            <label for="scheme-yellow" class="scheme-button">Yellow</label>
+            <label for="scheme-blue" class="scheme-button">Blue</label>
+            <label for="scheme-red" class="scheme-button">Red</label>
+            <label for="scheme-green" class="scheme-button">Green</label>
+            <label for="scheme-purple" class="scheme-button">Purple</label>
+            <label for="scheme-orange" class="scheme-button">Orange</label>
+            <label for="scheme-orbital" class="scheme-button">Orbital Classes</label>
+            <label for="scheme-nightsky" class="scheme-button">Night Sky</label>
+        </div>
+    </div>
+
+    <!-- Load html2canvas library from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <script>
+        // Y-axis only dragging functionality for neighborhood labels (except spatial density)
+        function makeDraggable(selector) {
+            const elements = document.querySelectorAll(selector);
+            
+            elements.forEach(el => {
+                let isDragging = false;
+                let startX = 0;
+                let startY = 0;
+                let startLeft = 0;
+                let startTop = 0;
+                let originalZIndex = el.style.zIndex || 50;
+                
+                // Check if this is the spatial density label - allow full dragging for it
+                const isSpatialDensity = el.textContent.includes('Spatial density');
+
+                el.addEventListener('mousedown', (e) => {
+                    // Only drag on primary mouse button (left click)
+                    if (e.button !== 0) return;
+                    
+                    isDragging = true;
+                    startY = e.clientY;
+                    
+                    // Get current position from inline style or computed style
+                    const computedStyle = window.getComputedStyle(el);
+                    startTop = parseFloat(el.style.top) || parseFloat(computedStyle.top) || 0;
+                    
+                    if (isSpatialDensity) {
+                        // For spatial density label, also track X position
+                        startX = e.clientX;
+                        startLeft = parseFloat(el.style.left) || parseFloat(computedStyle.left) || 0;
+                    }
+                    
+                    // Visual feedback for dragging
+                    el.classList.add('dragging');
+                    el.style.zIndex = 1000; // Bring to front
+                    document.body.style.userSelect = 'none'; // Prevent text selection
+                    document.body.style.cursor = isSpatialDensity ? 'move' : 'ns-resize'; // Show appropriate cursor
+                    
+                    // Prevent default to avoid text selection
+                    e.preventDefault();
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+                    
+                    const deltaY = e.clientY - startY;
+                    const newTop = startTop + deltaY;
+                    
+                    // Constrain to container bounds (with some padding)
+                    const containerHeight = 600;
+                    const labelHeight = el.offsetHeight || 40;
+                    const constrainedTop = Math.max(0, Math.min(containerHeight - labelHeight, newTop));
+                    
+                    if (isSpatialDensity) {
+                        // For spatial density label, allow both X and Y movement
+                        const deltaX = e.clientX - startX;
+                        const newLeft = startLeft + deltaX;
+                        const containerWidth = 1200;
+                        const labelWidth = el.offsetWidth || 160;
+                        const constrainedLeft = Math.max(0, Math.min(containerWidth - labelWidth, newLeft));
+                        el.style.left = constrainedLeft + 'px';
+                    }
+                    
+                    // Update top position for all labels
+                    el.style.top = constrainedTop + 'px';
+                });
+
+                document.addEventListener('mouseup', (e) => {
+                    if (!isDragging) return;
+                    
+                    isDragging = false;
+                    
+                    // Remove visual feedback
+                    el.classList.remove('dragging');
+                    el.style.zIndex = originalZIndex;
+                    document.body.style.userSelect = '';
+                    document.body.style.cursor = '';
+                });
+                
+                // Handle case where mouse leaves the window while dragging
+                document.addEventListener('mouseleave', () => {
+                    if (isDragging) {
+                        isDragging = false;
+                        el.classList.remove('dragging');
+                        el.style.zIndex = originalZIndex;
+                        document.body.style.userSelect = '';
+                        document.body.style.cursor = '';
+                    }
+                });
+                
+                // Keyboard accessibility for dragging
+                el.addEventListener('keydown', (e) => {
+                    const step = e.shiftKey ? 10 : 1; // Larger steps with shift
+                    const currentTop = parseFloat(el.style.top) || 0;
+                    let newTop = currentTop;
+                    
+                    switch(e.key) {
+                        case 'ArrowUp':
+                            newTop = Math.max(0, currentTop - step);
+                            break;
+                        case 'ArrowDown':
+                            const containerHeight = 600;
+                            const labelHeight = el.offsetHeight || 40;
+                            newTop = Math.min(containerHeight - labelHeight, currentTop + step);
+                            break;
+                        default:
+                            return; // Don't prevent default for other keys
+                    }
+                    
+                    el.style.top = newTop + 'px';
+                    e.preventDefault();
+                });
+            });
+        }
+
+        // Initialize dragging when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Setting up free dragging for neighborhood labels...');
+            makeDraggable('.neighborhood-label');
+            console.log('Dragging setup complete!');
+        });
+
+        // Toggle info box functionality
+        function toggleInfo() {
+            const infoBox = document.getElementById('info-box');
+            infoBox.classList.toggle('visible');
+        }
+
+        // Close info box when clicking outside
+        document.addEventListener('click', (e) => {
+            const infoSection = document.querySelector('.info-section');
+            const infoBox = document.getElementById('info-box');
+            
+            if (!infoSection.contains(e.target) && infoBox.classList.contains('visible')) {
+                infoBox.classList.remove('visible');
+            }
+        });
+
+        // Close info box on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const infoBox = document.getElementById('info-box');
+                infoBox.classList.remove('visible');
+            }
+        });
+        
+        // Color scheme functionality
+        document.addEventListener('DOMContentLoaded', () => {
+            const radioInputs = document.querySelectorAll('input[name="colorScheme"]');
+            const visualization = document.getElementById('visualization');
+            const allButtons = document.querySelectorAll('.scheme-button');
+            
+            // Function to update button highlighting
+            function updateButtonHighlighting() {
+                // Remove active class from all buttons
+                allButtons.forEach(button => {
+                    button.classList.remove('active-scheme');
+                });
+                
+                // Find the checked radio and highlight its corresponding button
+                radioInputs.forEach(input => {
+                    if (input.checked) {
+                        const correspondingButton = document.querySelector(`label[for="${input.id}"]`);
+                        if (correspondingButton) {
+                            correspondingButton.classList.add('active-scheme');
+                        }
+                    }
+                });
+            }
+            
+            radioInputs.forEach(input => {
+                input.addEventListener('change', () => {
+                    if (input.checked) {
+                        // Remove all scheme classes
+                        visualization.className = visualization.className.replace(/scheme-\w+/g, '');
+                        // Add the new scheme class
+                        visualization.classList.add(`scheme-${input.value}`);
+                        
+                        // Update button highlighting
+                        updateButtonHighlighting();
+                    }
+                });
+            });
+
+            // Initial button highlighting on page load
+            updateButtonHighlighting();
+
+            // Add pulse animation to question mark on startup
+            const infoButton = document.querySelector('.info-button');
+            if (infoButton) {
+                // Start pulsing after a short delay
+                setTimeout(() => {
+                    infoButton.classList.add('pulse');
+                    // Remove pulse class after animation completes (6 seconds for 3 pulses at 2s each)
+                    setTimeout(() => {
+                        infoButton.classList.remove('pulse');
+                    }, 6000);
+                }, 500);
+            }
+        });
+
+        // Context menu functionality
+        let contextMenu = null;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const visualization = document.getElementById('visualization');
+            contextMenu = document.getElementById('context-menu');
+            
+            // Right-click context menu
+            visualization.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                
+                // Position context menu at cursor
+                contextMenu.style.left = e.pageX + 'px';
+                contextMenu.style.top = e.pageY + 'px';
+                contextMenu.style.display = 'block';
+            });
+            
+            // Hide context menu on click elsewhere
+            document.addEventListener('click', (e) => {
+                if (!contextMenu.contains(e.target)) {
+                    contextMenu.style.display = 'none';
+                }
+            });
+            
+            // Hide context menu on escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    contextMenu.style.display = 'none';
+                }
+            });
+        });
+
+        // Save visualization as image
+        async function saveAsImage() {
+            try {
+                // Hide the context menu first
+                if (contextMenu) {
+                    contextMenu.style.display = 'none';
+                }
+                
+                // Hide any visible tooltips/info boxes temporarily
+                const infoBox = document.getElementById('info-box');
+                const wasInfoVisible = infoBox && infoBox.classList.contains('visible');
+                if (wasInfoVisible) {
+                    infoBox.classList.remove('visible');
+                }
+                
+                // Wait a brief moment for elements to disappear
+                await new Promise(resolve => setTimeout(resolve, 200));
+                
+                // Show loading indicator
+                const loadingIndicator = document.createElement('div');
+                loadingIndicator.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: rgba(0,0,0,0.9);
+                    color: #ffd700;
+                    padding: 20px 40px;
+                    border-radius: 10px;
+                    font-size: 16px;
+                    z-index: 99999;
+                    border: 2px solid #ffd700;
+                `;
+                loadingIndicator.textContent = 'Generating image...';
+                document.body.appendChild(loadingIndicator);
+                
+                // Use html2canvas library from CDN
+                if (typeof html2canvas === 'undefined') {
+                    // Dynamically load html2canvas if not available
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+                    document.head.appendChild(script);
+                    
+                    script.onload = () => {
+                        captureAndSave(loadingIndicator, wasInfoVisible);
+                    };
+                    script.onerror = () => {
+                        document.body.removeChild(loadingIndicator);
+                        fallbackSaveMethod();
+                    };
+                } else {
+                    captureAndSave(loadingIndicator, wasInfoVisible);
+                }
+            } catch (error) {
+                console.error('Error saving image:', error);
+                fallbackSaveMethod();
+            }
+        }
+
+        async function captureAndSave(loadingIndicator, wasInfoVisible) {
+            try {
+                const targetElement = document.getElementById('visualization');
+                console.log('Target element found:', targetElement);
+                
+                // Try simpler options first for better compatibility
+                console.log('Starting html2canvas capture...');
+                const canvas = await html2canvas(targetElement, {
+                    backgroundColor: '#000814',
+                    scale: 2, // Reduced scale for better compatibility
+                    useCORS: true,
+                    allowTaint: true,
+                    logging: false, // Disable logging to reduce console noise
+                    height: targetElement.offsetHeight,
+                    width: targetElement.offsetWidth,
+                    ignoreElements: function(element) {
+                        // Don't ignore any elements, let html2canvas try to render everything
+                        return false;
+                    },
+                    onclone: function(clonedDoc) {
+                        // Ensure SVG elements are properly cloned
+                        const clonedSvgs = clonedDoc.querySelectorAll('svg');
+                        clonedSvgs.forEach(svg => {
+                            svg.style.display = 'block';
+                            svg.style.visibility = 'visible';
+                        });
+                        
+                        // Make sure all altitude lines are visible
+                        const altLines = clonedDoc.querySelectorAll('.neighborhood-boundary');
+                        altLines.forEach(line => {
+                            line.style.stroke = '#ffd700';
+                            line.style.strokeWidth = '2';
+                            line.style.opacity = '1';
+                        });
+                        
+                        // Ensure altitude labels are visible
+                        const altLabels = clonedDoc.querySelectorAll('text');
+                        altLabels.forEach(text => {
+                            if (text.getAttribute('fill') === '#ffd700' || text.getAttribute('fill') === '#ff0037') {
+                                text.style.fill = text.getAttribute('fill');
+                                text.style.fontSize = text.style.fontSize || '22px';
+                                text.style.fontWeight = text.style.fontWeight || 'normal';
+                            }
+                        });
+                    }
+                });
+                
+                console.log('Canvas created successfully:', canvas);
+                
+                // Remove loading indicator
+                if (loadingIndicator && loadingIndicator.parentNode) {
+                    document.body.removeChild(loadingIndicator);
+                }
+                
+                // Generate filename with timestamp
+                const now = new Date();
+                const timestamp = now.toISOString().slice(0, 19).replace(/[:-]/g, '').replace('T', '_');
+                const filename = `esa-space-debris-visualization_${timestamp}.png`;
+                
+                console.log('Converting to blob...');
+                // Convert to blob and download
+                canvas.toBlob((blob) => {
+                    console.log('Blob created:', blob);
+                    if (blob) {
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = filename;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                        
+                        // Show success message
+                        showMessage('Image saved successfully!', 'success');
+                    } else {
+                        throw new Error('Failed to create image blob');
+                    }
+                }, 'image/png', 0.95);
+                
+                // Restore info box if it was visible
+                if (wasInfoVisible) {
+                    setTimeout(() => {
+                        const infoBox = document.getElementById('info-box');
+                        if (infoBox) {
+                            infoBox.classList.add('visible');
+                        }
+                    }, 500);
+                }
+                
+            } catch (error) {
+                console.error('Detailed error capturing image:', error);
+                console.error('Error type:', error.constructor.name);
+                console.error('Error message:', error.message);
+                console.error('Error stack:', error.stack);
+                
+                if (loadingIndicator && loadingIndicator.parentNode) {
+                    document.body.removeChild(loadingIndicator);
+                }
+                
+                // Show more specific error message
+                showMessage(`Image export failed: ${error.message || 'Unknown error'}`, 'error');
+            }
+        }
+        
+        function showMessage(text, type = 'info') {
+            const message = document.createElement('div');
+            message.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'success' ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)'};
+                color: white;
+                padding: 12px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                z-index: 99999;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transform: translateX(100%);
+                transition: transform 0.3s ease;
+            `;
+            message.textContent = text;
+            document.body.appendChild(message);
+            
+            // Animate in
+            setTimeout(() => {
+                message.style.transform = 'translateX(0)';
+            }, 10);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                message.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (message.parentNode) {
+                        document.body.removeChild(message);
+                    }
+                }, 300);
+            }, 3000);
+        }
+        
+        function fallbackSaveMethod() {
+            // Show error message instead of screenshot instructions
+            showMessage('Image export failed. Please try again.', 'error');
+        }
+
+    </script>
+</body>
+</html>
